@@ -1,2 +1,2 @@
 # SNGR_Automation
-Work for FFT on SNGR parametric study automation
+Changes from last week to the SNGR automation script
