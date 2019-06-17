@@ -34,7 +34,6 @@ if args.cases == []:
         if caseNameRegex.search(line) and line != 'Case Name: baseCase_template\n':
             args.cases.append(caseNameRegex.search(line).group(2))
 
-print(args.path)
 '''
 print(args.path)
 print(args.FILE)
@@ -57,7 +56,7 @@ def main():
     baseCaseName = extractParams()
 
     # Build Filetree with dictionary parameters EXCEPT frequency. Populate with base edat files
-    #buildTree(baseCaseName)
+    buildTree(baseCaseName)
 
     # TODO: Edit the pathnames and parameters of the ICFD and Actran analysis accordingly
     editParams(baseCaseName)
@@ -133,12 +132,44 @@ def buildTree(baseCaseName):
             shutil.copy(args.path + '\\' + keys + '_ICFD.edat', sub_case)
         os.chdir('..')
 
-def editParams(baseCaseName)
+def editParams(baseCaseName):
     ''' Walk over the filetree and make the necessary edits to the edat files using regExes to find
     where to replace necessary parameters'''
-    
 
+    freqRegex = re.compile(r'(BEGIN FREQUENCY_DOMAIN\s)(\w*\s\w*\s\w*)')
+    filtRegex = re.compile(r'(FILTER_AMPLITUDE)\s(\w*)')
+    sampRegex = re.compile(r'(NUMBER_SAMPLES)\s(\w*)')
+    thldRegex = re.compile(r'(TURBULENCE_THRESHOLD RELATIVE)\s(\w*)')
+    turbRegex = re.compile(r'(TURBULENT_MODES)\s(\w*)')
 
+    for keys in baseCaseName.keys():
+        for baseDir, subDir, files in os.walk('.\\' + keys):
+            if files == []:
+                continue
+
+            # Read actran analysis into memory, make substitutions to freq and filt, write new file
+            actranFile = open(baseDir + '\\' + keys + '.edat')
+            actranContent = actranFile.read()
+            actranFile.close()
+            new_actranContent = freqRegex.sub('\\1 ' + baseCaseName[keys]['freq'], actranContent)
+            # TODO: Using folder name to directly get filter value. Janky, fix me
+            new_actranContent = filtRegex.sub('\\1 ' + os.path.basename(baseDir)[4:8], actranContent)
+            actranFile = open(baseDir + '\\' + keys + '.edat', 'w')
+            actranFile.write(new_actranContent)
+            actranFile.close()
+                
+             # Read ICFD analysis into memory, make substitutions to samp, thld, turb, write new file
+            ICFDFile = open(baseDir + '\\' + keys + '_ICFD.edat')
+            ICFDContent = ICFDFILE.read()
+            ICFDFile.close()
+            # TODO: Using folder name to directly get values. Janky, will break for int dif than 2 dig, NEEDS FIX
+            new_ICFDContent = sampRegex.sub('\\1 ' + os.path.basename(baseDir)[13:15], actranContent)
+            new_ICFDContent = thldRegex.sub('\\1 ' + os.path.basename(baseDir)[20:24], actranContent)
+            new_ICFDContent = turbRegex.sub('\\1 ' + os.path.basename(baseDir)[29:], actranContent)
+            ICFDFile = open(baseDir + '\\' + keys + '_ICFD.edat', 'w')
+            ICFDFile.write(new_actranContent)
+            ICFDFile.close()
+            
 
 
 main()
