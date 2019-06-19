@@ -1,9 +1,8 @@
-# automate_SNGR.py collection of functions for automating SNGR parametric 
-# studies. Calls should go python automate_SNGR path2BaseRepository 
-# path2Inputfile caseNameRoot1 caseNameRoot2 ...
-# If no caseNameRoots are specified the program assumes all cases
+""" automate_SNGR.py collection of functions for automating SNGR parametric 
+studies. If no sepcific case are passes as arguements the program tests all
+cases defined in the mandatory SNGR parameter inputfile"""
 
-import numpy, re, os, shutil, argparse
+import numpy, re, os, shutil, argparse, subprocess
 
 parser = argparse.ArgumentParser(
     description = '''My description of how this script works.''',
@@ -34,12 +33,6 @@ if args.cases == []:
         if caseNameRegex.search(line) and line != 'Case Name: baseCase_template\n':
             args.cases.append(caseNameRegex.search(line).group(2))
 
-'''
-print(args.path)
-print(args.FILE)
-print(args.cases)
-'''
-
 # For loop through every arguement 2->end and append it to BaseCaseName dictionary. If no argument 
 # cases search path2Base for all .edat w/out ICFD and make call that collection BaseCaseName list.
 
@@ -58,10 +51,13 @@ def main():
     # Build Filetree with dictionary parameters EXCEPT frequency. Populate with base edat files
     buildTree(baseCaseName)
 
-    # TODO: Edit the pathnames and parameters of the ICFD and Actran analysis accordingly
-    editParams(baseCaseName)
+    # Edit the pathnames and parameters of the ICFD and Actran analysis accordingly
+    # TODO: Decide whether to edit pathnames or if they should all just be already pointing to path of the repository....
+    editParams(baseCaseName, args.path)
 
     # TODO: Launch each ICFD case. Launch each Actran Analysis
+    local_launcher('icfd')
+    local_launcher('actran')
 
     # TODO: Walk through BaseCase_Parametric filetrees, use session files for post-processing
 
@@ -132,45 +128,91 @@ def buildTree(baseCaseName):
             shutil.copy(args.path + '\\' + keys + '_ICFD.edat', sub_case)
         os.chdir('..')
 
-def editParams(baseCaseName):
+def editParams(baseCaseName, repo_path):
     ''' Walk over the filetree and make the necessary edits to the edat files using regExes to find
     where to replace necessary parameters'''
 
-    freqRegex = re.compile(r'(BEGIN FREQUENCY_DOMAIN\s)(\w*\s\w*\s\w*)')
-    filtRegex = re.compile(r'(FILTER_AMPLITUDE)\s(\w*)')
-    sampRegex = re.compile(r'(NUMBER_SAMPLES)\s(\w*)')
-    thldRegex = re.compile(r'(TURBULENCE_THRESHOLD RELATIVE)\s(\w*)')
-    turbRegex = re.compile(r'(TURBULENT_MODES)\s(\w*)')
+    freqRegex = re.compile(r'(BEGIN FREQUENCY_DOMAIN\s)(.*)\s')
+    filtRegex = re.compile(r'(FILTER_AMPLITUDE)\s(.*)')
+    sampRegex = re.compile(r'(NUMBER_SAMPLES)\s(.*)')
+    thldRegex = re.compile(r'(TURBULENCE_THRESHOLD RELATIVE)\s(.*)')
+    turbRegex = re.compile(r'(TURBULENT_MODES)\s(.*)')
+    meshRegex = re.compile(r'(NFF\s*FILE)\s(\w*.nff)')
+    cfdRegex = re.compile(r'INPUT_FILE (\w*) "(.*)"')
+    dirName_filtRegex = re.compile(r'(filt)(.*?)_')
+    dirName_sampRegex = re.compile(r'(samp)(.*?)_')
+    dirName_thldRegex = re.compile(r'(thld)(.*?)_')
+    dirName_turbRegex = re.compile(r'(turb)(.*)')
 
     for keys in baseCaseName.keys():
         for baseDir, subDir, files in os.walk('.\\' + keys):
             if files == []:
                 continue
+            
+            # Get parameters from directory name
+            filt = dirName_filtRegex.search(os.path.basename(baseDir)).group(2)
+            samp = dirName_sampRegex.search(os.path.basename(baseDir)).group(2)
+            samp = dirName_sampRegex.search(os.path.basename(baseDir)).group(2)
+            thld = dirName_thldRegex.search(os.path.basename(baseDir)).group(2)
+            turb = dirName_turbRegex.search(os.path.basename(baseDir)).group(2)
 
-            # Read actran analysis into memory, make substitutions to freq and filt, write new file
+            # Read actran analysis into memory, make substitutions to freq, filt, and mesh path, write new file
             actranFile = open(baseDir + '\\' + keys + '.edat')
             actranContent = actranFile.read()
             actranFile.close()
-            new_actranContent = freqRegex.sub('\\1 ' + baseCaseName[keys]['freq'], actranContent)
-            # TODO: Using folder name to directly get filter value. Janky, fix me
-            new_actranContent = filtRegex.sub('\\1 ' + os.path.basename(baseDir)[4:8], actranContent)
+            new_actranContent = freqRegex.sub('\\1 ' + baseCaseName[keys]['freq'] + '\\n', actranContent)
+            mesh_path = '..\\..\\' + os.path.relpath(repo_path) + '\\' + keys + '.nff'
+            new_actranContent = new_actranContent.replace(meshRegex.search(new_actranContent).group(2), mesh_path)
+            new_actranContent = filtRegex.sub('\\1 ' + filt, new_actranContent)
             actranFile = open(baseDir + '\\' + keys + '.edat', 'w')
             actranFile.write(new_actranContent)
             actranFile.close()
-                
-             # Read ICFD analysis into memory, make substitutions to samp, thld, turb, write new file
-            ICFDFile = open(baseDir + '\\' + keys + '_ICFD.edat')
-            ICFDContent = ICFDFILE.read()
-            ICFDFile.close()
-            # TODO: Using folder name to directly get values. Janky, will break for int dif than 2 dig, NEEDS FIX
-            new_ICFDContent = sampRegex.sub('\\1 ' + os.path.basename(baseDir)[13:15], actranContent)
-            new_ICFDContent = thldRegex.sub('\\1 ' + os.path.basename(baseDir)[20:24], actranContent)
-            new_ICFDContent = turbRegex.sub('\\1 ' + os.path.basename(baseDir)[29:], actranContent)
-            ICFDFile = open(baseDir + '\\' + keys + '_ICFD.edat', 'w')
-            ICFDFile.write(new_actranContent)
-            ICFDFile.close()
             
+            # Read ICFD analysis into memory, make substitutions to samp, thld, turb, write new file
+            ICFDFile = open(baseDir + '\\' + keys + '_ICFD.edat')
+            ICFDContent = ICFDFile.read()
+            ICFDFile.close()
+            new_ICFDContent = freqRegex.sub('\\1 ' + '\t  ' + baseCaseName[keys]['freq'] \
+                + '\\n', ICFDContent)
+            cfd_path = '..\\\\..\\\\' + os.path.relpath(repo_path).replace('\\', '\\\\') \
+                + '\\\\' + cfdRegex.search(new_ICFDContent).group(2) 
+            new_ICFDContent = new_ICFDContent.replace(cfdRegex.search(new_ICFDContent).group(2), cfd_path)
+            new_ICFDContent = sampRegex.sub('\\1 ' + samp, new_ICFDContent)
+            new_ICFDContent = thldRegex.sub('\\1 ' + thld, new_ICFDContent)
+            new_ICFDContent = turbRegex.sub('\\1 ' + turb, new_ICFDContent)
+            ICFDFile = open(baseDir + '\\' + keys + '_ICFD.edat', 'w')
+            ICFDFile.write(new_ICFDContent)
+            ICFDFile.close()
 
+def local_launcher(analysis):
+    '''Walk over each case filetree and launch the ICFD cases. Is there local sync option? Queue actran 
+    to run next.'''
+
+    actranpy_path = os.environ['ACTRAN_PATH'] + '\\Actran_19.0\\bin\\actranpy.bat'
+    start_dir = os.getcwd()
+    
+    for keys in baseCaseName.keys():
+        for baseDir, subDir, files in os.walk('.\\' + keys):
+            """print(baseDir)
+            print(subDir)
+            print(files)"""
+            if files == []:
+                continue
+            os.chdir(os.path.abspath(baseDir))
+            files = os.listdir()
+            if analysis == 'icfd':
+                icfd_file = [icfd for icfd in files if 'ICFD' in icfd][0]
+                inputfile = "--inputfile=" + icfd_file
+                subprocess.call([actranpy_path, "-uICFD", inputfile]) 
+                #print(icfd_file)
+            if analysis == 'actran':
+                #edat_file = [edat for edat in files if (keys in edat and 'ICFD' not in edat)][0]
+                edat_file = keys + '.edat'
+                inputfile = "--inputfile=" + edat_file
+                subprocess.call([actranpy_path, inputfile]) 
+                #print(edat_file)
+
+            os.chdir(start_dir)
 
 main()
 
