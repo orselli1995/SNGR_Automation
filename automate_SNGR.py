@@ -2,7 +2,7 @@
 studies. If no sepcific case are passes as arguements the program tests all
 cases defined in the mandatory SNGR parameter inputfile"""
 
-import numpy, re, os, shutil, argparse, subprocess
+import numpy, re, os, shutil, argparse, subprocess, sys
 
 parser = argparse.ArgumentParser(
     description = '''My description of how this script works.''',
@@ -22,6 +22,12 @@ args = parser.parse_args()
 args.path = os.path.abspath(args.path)
 args.FILE = os.path.abspath(args.FILE)
 
+if not os.path.isfile(args.FILE):
+    sys.exit('The input SHGR parameter file address is not valid')
+
+if not os.path.isdir(args.path):
+    sys.exit('The input basecase repository pathname does not point to a valid directory')
+
 # Retrieve cases from input file if cases list is empty 
 
 if args.cases == []:
@@ -32,6 +38,14 @@ if args.cases == []:
     for line in inputLines:
         if caseNameRegex.search(line) and line != 'Case Name: baseCase_template\n':
             args.cases.append(caseNameRegex.search(line).group(2))
+
+for case in args.cases:
+    if case + '.edat' not in os.listdir(args.path):
+        sys.exit('''One or all of the desired cases was not found in the Automation Repository.
+        This could be due to:
+            1) The name of the case is misspelled in the --cases arguement
+            2) The name of the case is misspelled in the input parameter file
+            3) The --path arguement does not point to the Automation Repository''')
 
 # For loop through every arguement 2->end and append it to BaseCaseName dictionary. If no argument 
 # cases search path2Base for all .edat w/out ICFD and make call that collection BaseCaseName list.
@@ -52,12 +66,11 @@ def main():
     buildTree(baseCaseName)
 
     # Edit the pathnames and parameters of the ICFD and Actran analysis accordingly
-    # TODO: Decide whether to edit pathnames or if they should all just be already pointing to path of the repository....
     editParams(baseCaseName, args.path)
 
-    # TODO: Launch each ICFD case. Launch each Actran Analysis
-    local_launcher('icfd')
-    local_launcher('actran')
+    # Launch each ICFD case. Launch each Actran Analysis
+    #local_launcher('icfd')
+    #local_launcher('actran')
 
     # TODO: Walk through BaseCase_Parametric filetrees, use session files for post-processing
 
@@ -86,29 +99,59 @@ def extractParams():
                 baseCaseName[keys]['turb'] = turbRegex.search(''.join(chunk)).group(2)
     return baseCaseName
 
-def myRange(spaceDelimStr):
+def myRange(spaceDelimStr, parameter_type):
     ''' Similar to np.arange, but working how I think it should work. The ending of a range is
     always included. Also check for user errors in ranges in the input file. '''
     
-    range = []
+    ran = []
     ranList = spaceDelimStr.split(' ')
+    
+    if parameter_type == 'freq' and len(ranList) != 3:
+        sys.exit('''The input file is formatted poorly. Frequency must be written as a range,
+        in the format START STEP STOP''')
+
+    if len(ranList) == 1:
+        if float(spaceDelimStr) < 0:
+            sys.exit('''The input file is formatted poorly. Please make sure that no negative values are used
+            for SNGR parameters''')
+        else:
+            return [float(spaceDelimStr)]
+
     if len(ranList) != 3:
-        return [float(spaceDelimStr)]
+        sys.exit('''The input file is formatted poorly. Please make sure that inputs are either single float
+        numbers or 3 space seperated numbers as START STEP STOP''')
+
     start = float(ranList[0])
     step = float(ranList[1])
     end = float(ranList[2])
     
     # TODO: Check that none of the ranges are choosen poorly. If there is a negative value, end < start, 
     # start + step > end, or non-ints for samps and turb modes, stop execution and throw a warning.
+    if start < 0 or stop < 0 or step < 0:
+        sys.exit('''The input file is formatted poorly. Please make sure that no negative values are used
+        for SNGR parameters''')
+    
+    if start > stop or start+step*25 < stop:
+        sys.exit('''The input file is formatted poorly. Either the range start value > stop value, or the step is 
+        too small''')
 
-    range.append(start)
-    while range[-1] < end-step:
-        range.append(range[-1] + step)
-    range.append(end)
-    return range
+
+
+
+    ran.append(start)
+    while ran[-1] < end-step:
+        ran.append(ran[-1] + step)
+    ran.append(end)
+    return ran
 
 def buildTree(baseCaseName):
     ''' Make a filetree for the ranges of parameters given, and copy-paste the base case edat files. '''
+
+    # Perform a check that the input file is formatted correctly
+    for keys in baseCaseName.keys():
+        for param_keys in baseCaseName[keys]:
+            myRange(baseCaseName[keys][param_keys], param_keys)
+
 
     for keys in baseCaseName.keys():
         param_list = []
@@ -118,7 +161,7 @@ def buildTree(baseCaseName):
             if param_keys == 'freq':
                 continue
             else:
-                param_list.append(myRange(baseCaseName[keys][param_keys]))
+                param_list.append(myRange(baseCaseName[keys][param_keys], param_keys))
        
         fold_names = list('filt%.2f_samp%d_thld%.2f_turb%d' % (w, x, y, z) for w in param_list[0]\
                 for x in param_list[1] for y in param_list[2] for z in param_list[3])
@@ -185,32 +228,27 @@ def editParams(baseCaseName, repo_path):
             ICFDFile.close()
 
 def local_launcher(analysis):
-    '''Walk over each case filetree and launch the ICFD cases. Is there local sync option? Queue actran 
-    to run next.'''
+    '''Walk over each case filetree and launch the ICFD cases, then the actran analysis.'''
+   
 
     actranpy_path = os.environ['ACTRAN_PATH'] + '\\Actran_19.0\\bin\\actranpy.bat'
     start_dir = os.getcwd()
     
     for keys in baseCaseName.keys():
         for baseDir, subDir, files in os.walk('.\\' + keys):
-            """print(baseDir)
-            print(subDir)
-            print(files)"""
             if files == []:
                 continue
             os.chdir(os.path.abspath(baseDir))
             files = os.listdir()
             if analysis == 'icfd':
-                icfd_file = [icfd for icfd in files if 'ICFD' in icfd][0]
+                icfd_file = keys + '_ICFD.edat' 
                 inputfile = "--inputfile=" + icfd_file
-                subprocess.call([actranpy_path, "-uICFD", inputfile]) 
-                #print(icfd_file)
+                subprocess.call([actranpy_path, "-uICFD", inputfile, "--report=report_ICFD"]) 
             if analysis == 'actran':
                 #edat_file = [edat for edat in files if (keys in edat and 'ICFD' not in edat)][0]
                 edat_file = keys + '.edat'
                 inputfile = "--inputfile=" + edat_file
-                subprocess.call([actranpy_path, inputfile]) 
-                #print(edat_file)
+                subprocess.call([actranpy_path, inputfile, "--report=report_Actran"]) 
 
             os.chdir(start_dir)
 
