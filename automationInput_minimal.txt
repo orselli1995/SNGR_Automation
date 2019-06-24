@@ -1,0 +1,27 @@
+This file contains the parameters for all the Base Cases to be studied
+
+Below is a sample of the way each case should be formatted
+
+Case Name: baseCase_template
+Frequency: 20 400 3000
+Filter: 0.05
+# Samples: 30 30 300
+Threshold: 0.0 0.05 0.25
+# Turbulent Modes: 30 30 120
+
+True Cases to be Studied
+
+Case Name: Visteon
+Frequency: 500 100 500
+Filter: 0.0
+# Samples: 1 
+Threshold: 0.3
+# Turbulent Modes: 15 
+
+Case Name: rod_airfoil
+Frequency: 350 50 400
+Filter: 0.0
+# Samples: 1
+Threshold: 0.5
+# Turbulent Modes: 15
+

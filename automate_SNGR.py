@@ -7,10 +7,7 @@ import numpy, re, os, shutil, argparse, subprocess, sys
 parser = argparse.ArgumentParser(
     description = '''My description of how this script works.''',
     epilog = '''For more help/questions email joe.orselli@fft.be''')
-#parser.add_argument('PATH', help='Path to the repository of base cases') 
 parser.add_argument('FILE', help='Path to the input file containing the SNGR parameters')
-#parser.add_argument('--path', '-p', help='Path to the repository of base cases', required = True)
-#parser.add_argument('-f', '--file', help='Path to the input file containing the SNGR parameters', required=True)
 parser.add_argument('--path', '-p', help='Path to the repository of base cases', required = True)
 parser.add_argument('--cases', '-c', nargs='*', default = [], help = '''List of names of the cases from 
 the base case repository to be studied. If not specified, use all cases defined in input data file''') 
@@ -69,8 +66,8 @@ def main():
     editParams(baseCaseName, args.path)
 
     # Launch each ICFD case. Launch each Actran Analysis
-    #local_launcher('icfd')
-    #local_launcher('actran')
+    local_launcher('icfd')
+    local_launcher('actran')
 
     # TODO: Walk through BaseCase_Parametric filetrees, use session files for post-processing
 
@@ -92,11 +89,11 @@ def extractParams():
         for lines in inputContents:
             if caseRegex.search(lines):
                 chunk = inputContents[inputContents.index(lines):inputContents.index(lines)+6]
-                baseCaseName[keys]['freq'] = freqRegex.search(''.join(chunk)).group(2)
-                baseCaseName[keys]['filt'] = filtRegex.search(''.join(chunk)).group(2)
-                baseCaseName[keys]['samp'] = sampRegex.search(''.join(chunk)).group(2)
-                baseCaseName[keys]['thld'] = thldRegex.search(''.join(chunk)).group(2)
-                baseCaseName[keys]['turb'] = turbRegex.search(''.join(chunk)).group(2)
+                baseCaseName[keys]['freq'] = freqRegex.search(''.join(chunk)).group(2).strip()
+                baseCaseName[keys]['filt'] = filtRegex.search(''.join(chunk)).group(2).strip()
+                baseCaseName[keys]['samp'] = sampRegex.search(''.join(chunk)).group(2).strip()
+                baseCaseName[keys]['thld'] = thldRegex.search(''.join(chunk)).group(2).strip()
+                baseCaseName[keys]['turb'] = turbRegex.search(''.join(chunk)).group(2).strip()
     return baseCaseName
 
 def myRange(spaceDelimStr, parameter_type):
@@ -105,42 +102,40 @@ def myRange(spaceDelimStr, parameter_type):
     
     ran = []
     ranList = spaceDelimStr.split(' ')
-    
+    ranList = [a for a in ranList if a != '']
+
     if parameter_type == 'freq' and len(ranList) != 3:
         sys.exit('''The input file is formatted poorly. Frequency must be written as a range,
         in the format START STEP STOP''')
 
     if len(ranList) == 1:
-        if float(spaceDelimStr) < 0:
+        if round(float(spaceDelimStr),2) < 0:
             sys.exit('''The input file is formatted poorly. Please make sure that no negative values are used
             for SNGR parameters''')
         else:
-            return [float(spaceDelimStr)]
+            return [round(float(spaceDelimStr),2)]
 
     if len(ranList) != 3:
-        sys.exit('''The input file is formatted poorly. Please make sure that inputs are either single float
+        sys.exit('''The input file is formatted poorly. Please make sure that inputs are either single round(float
         numbers or 3 space seperated numbers as START STEP STOP''')
 
-    start = float(ranList[0])
-    step = float(ranList[1])
-    end = float(ranList[2])
+    start = round(float(ranList[0]),2)
+    step = round(float(ranList[1]),2)
+    end = round(float(ranList[2]),2)
     
     # TODO: Check that none of the ranges are choosen poorly. If there is a negative value, end < start, 
     # start + step > end, or non-ints for samps and turb modes, stop execution and throw a warning.
-    if start < 0 or stop < 0 or step < 0:
+    if start < 0 or end < 0 or step < 0:
         sys.exit('''The input file is formatted poorly. Please make sure that no negative values are used
         for SNGR parameters''')
     
-    if start > stop or start+step*25 < stop:
+    if start > end or start+step*25 < end:
         sys.exit('''The input file is formatted poorly. Either the range start value > stop value, or the step is 
         too small''')
 
-
-
-
     ran.append(start)
     while ran[-1] < end-step:
-        ran.append(ran[-1] + step)
+        ran.append(round(ran[-1] + step, 2))
     ran.append(end)
     return ran
 
@@ -152,24 +147,44 @@ def buildTree(baseCaseName):
         for param_keys in baseCaseName[keys]:
             myRange(baseCaseName[keys][param_keys], param_keys)
 
-
+    # For over each case being run
     for keys in baseCaseName.keys():
-        param_list = []
+        count = 0
         os.mkdir(keys)
         os.chdir(keys)
+        # For over each parameter to be varied
         for param_keys in baseCaseName[keys]:
             if param_keys == 'freq':
                 continue
             else:
-                param_list.append(myRange(baseCaseName[keys][param_keys], param_keys))
-       
-        fold_names = list('filt%.2f_samp%d_thld%.2f_turb%d' % (w, x, y, z) for w in param_list[0]\
-                for x in param_list[1] for y in param_list[2] for z in param_list[3])
-        for sub_case in fold_names:
-            os.mkdir(sub_case)
-            shutil.copy(args.path + '\\' + keys + '.edat', sub_case)
-            shutil.copy(args.path + '\\' + keys + '_ICFD.edat', sub_case)
+                subcases = myRange(baseCaseName[keys][param_keys], param_keys)
+                if len(subcases) == 1:
+                    count += 1 
+                    if count == 4:
+                        os.mkdir('No_Parametric_Study')
+                        os.chdir('No_Parametric_Study')
+                        subdir = 'filt_%ssamp_%sthld_%sturb_%s' % (baseCaseName[keys]['filt'], \
+                            baseCaseName[keys]['samp'], baseCaseName[keys]['thld'], baseCaseName[keys]['turb'])
+                        os.mkdir(subdir)
+                        shutil.copy(args.path + '\\' + keys + '.edat', subdir)
+                        shutil.copy(args.path + '\\' + keys + '_ICFD.edat', subdir)
+                        os.chdir('..')
+                    continue
+                else:
+                    os.mkdir(param_keys)
+                    # For over each value the parameter being varied may take on
+                    for subcase in subcases:
+                        subcase_dir = param_keys + '_' + str(subcase)
+                        os.chdir(param_keys)
+                        os.mkdir(subcase_dir)
+                        shutil.copy(args.path + '\\' + keys + '.edat', subcase_dir)
+                        shutil.copy(args.path + '\\' + keys + '_ICFD.edat', subcase_dir)
+                        os.chdir('..')
+
         os.chdir('..')
+
+
+
 
 def editParams(baseCaseName, repo_path):
     ''' Walk over the filetree and make the necessary edits to the edat files using regExes to find
@@ -182,29 +197,46 @@ def editParams(baseCaseName, repo_path):
     turbRegex = re.compile(r'(TURBULENT_MODES)\s(.*)')
     meshRegex = re.compile(r'(NFF\s*FILE)\s(\w*.nff)')
     cfdRegex = re.compile(r'INPUT_FILE (\w*) "(.*)"')
-    dirName_filtRegex = re.compile(r'(filt)(.*?)_')
-    dirName_sampRegex = re.compile(r'(samp)(.*?)_')
-    dirName_thldRegex = re.compile(r'(thld)(.*?)_')
-    dirName_turbRegex = re.compile(r'(turb)(.*)')
+    dirName_filtRegex = re.compile(r'(filt)_([\d,\.]*)')
+    dirName_sampRegex = re.compile(r'(samp)_([\d,\.]*)')
+    dirName_thldRegex = re.compile(r'(thld)_([\d,\.]*)')
+    dirName_turbRegex = re.compile(r'(turb)_([\d,\.]*)')
+
+
+    param_list = []
 
     for keys in baseCaseName.keys():
+        # Get param_list for file edits
+        for param_keys in baseCaseName[keys]:
+            param_list.append(myRange(baseCaseName[keys][param_keys], param_keys))
+
+        # Default parameter values
+        filt = str(param_list[1][0]) 
+        samp = str(param_list[2][0]) 
+        thld = str(param_list[3][0])
+        turb = str(param_list[4][0])
+
+        # Walk over path, make edits appropriatley
         for baseDir, subDir, files in os.walk('.\\' + keys):
             if files == []:
                 continue
-            
-            # Get parameters from directory name
-            filt = dirName_filtRegex.search(os.path.basename(baseDir)).group(2)
-            samp = dirName_sampRegex.search(os.path.basename(baseDir)).group(2)
-            samp = dirName_sampRegex.search(os.path.basename(baseDir)).group(2)
-            thld = dirName_thldRegex.search(os.path.basename(baseDir)).group(2)
-            turb = dirName_turbRegex.search(os.path.basename(baseDir)).group(2)
+
+            # Check what parameter directory currently in, and edit the corresponding parameter value
+            if 'filt' in baseDir:
+                filt = dirName_filtRegex.search(os.path.basename(baseDir)).group(2) 
+            if 'samp' in baseDir:
+                samp = dirName_sampRegex.search(os.path.basename(baseDir)).group(2) 
+            if 'thld' in baseDir:
+                thld = dirName_thldRegex.search(os.path.basename(baseDir)).group(2) 
+            if 'turb' in baseDir:
+                turb = dirName_turbRegex.search(os.path.basename(baseDir)).group(2) 
 
             # Read actran analysis into memory, make substitutions to freq, filt, and mesh path, write new file
             actranFile = open(baseDir + '\\' + keys + '.edat')
             actranContent = actranFile.read()
             actranFile.close()
             new_actranContent = freqRegex.sub('\\1 ' + baseCaseName[keys]['freq'] + '\\n', actranContent)
-            mesh_path = '..\\..\\' + os.path.relpath(repo_path) + '\\' + keys + '.nff'
+            mesh_path = '..\\..\\..\\' + os.path.relpath(repo_path) + '\\' + keys + '.nff'
             new_actranContent = new_actranContent.replace(meshRegex.search(new_actranContent).group(2), mesh_path)
             new_actranContent = filtRegex.sub('\\1 ' + filt, new_actranContent)
             actranFile = open(baseDir + '\\' + keys + '.edat', 'w')
@@ -217,7 +249,7 @@ def editParams(baseCaseName, repo_path):
             ICFDFile.close()
             new_ICFDContent = freqRegex.sub('\\1 ' + '\t  ' + baseCaseName[keys]['freq'] \
                 + '\\n', ICFDContent)
-            cfd_path = '..\\\\..\\\\' + os.path.relpath(repo_path).replace('\\', '\\\\') \
+            cfd_path = '..\\\\..\\\\..\\\\' + os.path.relpath(repo_path).replace('\\', '\\\\') \
                 + '\\\\' + cfdRegex.search(new_ICFDContent).group(2) 
             new_ICFDContent = new_ICFDContent.replace(cfdRegex.search(new_ICFDContent).group(2), cfd_path)
             new_ICFDContent = sampRegex.sub('\\1 ' + samp, new_ICFDContent)
@@ -226,6 +258,12 @@ def editParams(baseCaseName, repo_path):
             ICFDFile = open(baseDir + '\\' + keys + '_ICFD.edat', 'w')
             ICFDFile.write(new_ICFDContent)
             ICFDFile.close()
+
+
+            # Another idea using replace; the problem is that only looks to match group(2), not the whole regex
+            #new_ICFDContent = new_ICFDContent.replace(sampRegex.search(new_ICFDContent).group(2), samp)
+            #new_ICFDContent = new_ICFDContent.replace(thldRegex.search(new_ICFDContent).group(2), thld)
+            #new_ICFDContent = new_ICFDContent.replace(turbRegex.search(new_ICFDContent).group(2), turb)
 
 def local_launcher(analysis):
     '''Walk over each case filetree and launch the ICFD cases, then the actran analysis.'''
@@ -245,12 +283,18 @@ def local_launcher(analysis):
                 inputfile = "--inputfile=" + icfd_file
                 subprocess.call([actranpy_path, "-uICFD", inputfile, "--report=report_ICFD"]) 
             if analysis == 'actran':
-                #edat_file = [edat for edat in files if (keys in edat and 'ICFD' not in edat)][0]
                 edat_file = keys + '.edat'
                 inputfile = "--inputfile=" + edat_file
                 subprocess.call([actranpy_path, inputfile, "--report=report_Actran"]) 
 
             os.chdir(start_dir)
+
+
+def post_pro():
+    '''Copy default session files from automation repository to case directory. Make the
+    necessary edits and run, have all images output to 'figures' directory.'''
+
+
 
 main()
 
