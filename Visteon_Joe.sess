@@ -28,11 +28,11 @@ except AssertionError:
 trans = {"filt": "Filter", "samp": "Samples", "turb": "Turbulent Modes", "thld": "Threshold", "Mic_1": "Microphone 1", "Mic_2": "Microphone 2", "Mic_3": "Microphone 3", "Outlet": "Outlet Radiated Power", "Inlet": "Inlet Radiated Power"}
 
 # Some helpful, simplifying functions
-def init_Figs(fig, fc, fig_type, plt_set):
+def init_Figs():
     fig.append(pltviewer.new_figure())
     pltviewer.set_prop( fig[fc], font_size='16' )
     pltviewer.set_prop( fig[fc], xlabel=u'Frequency [Hz]' )
-    fig_title = [set_info[plt_set]['param'], trans[fig_type]]
+    fig_title = [set_info[sets]['param'], trans[fig_type]]
     pltviewer.set_prop( fig[fc], title='Visteon %s Convergence - %s' %(fig_title[0], fig_title[1]))
     
     # TODO: Make this somehow general to all user input options.... (spl, mp, etc...)
@@ -47,14 +47,32 @@ def init_Figs(fig, fc, fig_type, plt_set):
     
     
 def plotter():
-        X = '{pltviewer.get_set( id=%s).%s["%s"].field["f"]}' %(set_info[sets]['id'], thing, part)
-        Y = 'dB_pressure(MEAN(AMPLITUDE({pltviewer.get_set( id=%s).%s["%s"].field["fp"]})))' %(set_dict[st], thing, part)
-        func = pltviewer.new_func(x=X,y=Y)
-        label = set_info[sets]['param'] + "=" + set_info[sets]['value']
-        color = colors_list[set_count]
-        curve = pltviewer.plot( function=func, figure=fig[fc] , label=label)
-        pltviewer.set_prop(curve, line_color=color)
-
+    # TODO: Improve this so that is doesn't just pick between either a micro plot or a rad power plot... should also find some way to match what I want to the key list index...    
+    if 'Mic' in fig_type:
+        id = set_info[sets]['id']
+        set_component = set_list[int(set_info[sets]['id'])-1].pltdict.keys()[1]
+        component_identifier = set_list[int(set_info[sets]['id'])-1].pltdict.values()[1].dictobj.keys()[int(fig_type[-1])-1]
+        
+        X = '{pltviewer.get_set( id=%s).%s["%s"].field["f"]}' %(id, set_component, component_identifier)
+        Y = 'dB_pressure(MEAN(AMPLITUDE({pltviewer.get_set( id=%s).%s["%s"].field["fp"]})))' %(id, set_component, component_identifier)
+    else:
+        #pltviewer_1.update_func(func=func_14,x='{set_1.POINT_2["3663425"].field["f"]}',y='dB_power(MEAN({set_2.DOMAIN["InfiniteAcoustic4"].field["rP"]}))')
+        id = set_info[sets]['id']
+        set_component = set_list[int(set_info[sets]['id'])-1].pltdict.keys()[0]
+        component_identifier = set_list[int(set_info[sets]['id'])-1].pltdict.values()[0].dictobj.keys()[2]
+        
+        if 'Out' in fig_type:
+            component_identifier = set_list[int(set_info[sets]['id'])-1].pltdict.values()[0].dictobj.keys()[3]
+        
+        X = '{pltviewer.get_set( id=%s).%s["%s"].field["f"]}' %(id, set_component, component_identifier)
+        Y = 'dB_power(MEAN({pltviewer.get_set( id=%s).%s["%s"].field["rP"]}))' %(id, set_component, component_identifier)
+        
+    #Plot on each figure    
+    func = pltviewer.new_func(x=X,y=Y)
+    label = set_info[sets]['param'] + "=" + set_info[sets]['value']
+    color = colors_list[set_count]
+    curve = pltviewer.plot( function=func, figure=fig[fc] , label=label)
+    pltviewer.set_prop(curve, line_color=color)
  
 
 # Open PLTViewer 
@@ -110,10 +128,12 @@ set_count = 0 # Set counter
 fig = []      # List of figures 
 for sets in set_info.keys():
     fc = 0 # Figure Counter
-    for figure in plot_figures:
+    for fig_type in plot_figures:
         if set_count == 0: #Initialize the figures, only on first loop on sets
-            init_Figs(fig, fc, figure, sets)
+            init_Figs()
         
+        plotter()
+        """
         # TODO: Improve this so that is doesn't just pick between either a micro plot or a rad power plot... should also find some way to match what I want to the key list index...    
         if 'Mic' in figure:
             id = set_info[sets]['id']
@@ -123,10 +143,6 @@ for sets in set_info.keys():
             X = '{pltviewer.get_set( id=%s).%s["%s"].field["f"]}' %(id, set_component, component_identifier)
             Y = 'dB_pressure(MEAN(AMPLITUDE({pltviewer.get_set( id=%s).%s["%s"].field["fp"]})))' %(id, set_component, component_identifier)
         else:
-            """
-            fc += 1
-            continue
-            """
             #pltviewer_1.update_func(func=func_14,x='{set_1.POINT_2["3663425"].field["f"]}',y='dB_power(MEAN({set_2.DOMAIN["InfiniteAcoustic4"].field["rP"]}))')
             id = set_info[sets]['id']
             set_component = set_list[int(set_info[sets]['id'])-1].pltdict.keys()[0]
@@ -144,7 +160,7 @@ for sets in set_info.keys():
         color = colors_list[set_count]
         curve = pltviewer.plot( function=func, figure=fig[fc] , label=label)
         pltviewer.set_prop(curve, line_color=color)
-        
+        """
         fc += 1
     set_count += 1
 
