@@ -1,0 +1,151 @@
+# This session file should be general to all the Visteon cases, and be able to be called by the main automation script
+
+import os
+import sys
+import numpy as np
+import re
+import matplotlib
+from pprint import pprint
+
+#----------- User inputs -------------------#
+
+colormap = 'viridis'
+# All possible figures include mic1 -> 3, radiapted power at the inlet and outlet. Remove any non-desired plot
+plot_figures = ['Mic_1', 'Mic_2', 'Mic_3', 'Outlet', 'Inlet']
+
+#--------- End User inputs -----------------#
+
+# Check that we're in the proper PostPro directory
+
+try:
+    assert os.path.basename(os.getcwd()) == 'PostPro'
+except AssertionError:
+    print("The configurations do not all have the same amount of simulation results\n")
+    print("The program has ended unsuccessfully")
+    sys.exit()
+
+# Translators
+trans = {"filt": "Filter", "samp": "Samples", "turb": "Turbulent Modes", "thld": "Threshold", "Mic_1": "Microphone 1", "Mic_2": "Microphone 2", "Mic_3": "Microphone 3", "Outlet": "Outlet Radiated Power", "Inlet": "Inlet Radiated Power"}
+
+# Some helpful, simplifying functions
+def init_Figs(fig, fc, fig_type, plt_set):
+    fig.append(pltviewer.new_figure())
+    pltviewer.set_prop( fig[fc], font_size='16' )
+    pltviewer.set_prop( fig[fc], xlabel=u'Frequency [Hz]' )
+    fig_title = [set_info[plt_set]['param'], trans[fig_type]]
+    pltviewer.set_prop( fig[fc], title='Visteon %s Convergence - %s' %(fig_title[0], fig_title[1]))
+    
+    # TODO: Make this somehow general to all user input options.... (spl, mp, etc...)
+    if 'Mic' in fig_type:
+        Y_label = 'SPL [dB]'
+        thing = "fp" #press
+    else:
+        Y_label = 'Radiated Power [dB]'
+        thing = "rP" #rad power
+        
+    pltviewer.set_prop( fig[fc], ylabel=Y_label )
+    
+    
+def plotter():
+        X = '{pltviewer.get_set( id=%s).%s["%s"].field["f"]}' %(set_info[sets]['id'], thing, part)
+        Y = 'dB_pressure(MEAN(AMPLITUDE({pltviewer.get_set( id=%s).%s["%s"].field["fp"]})))' %(set_dict[st], thing, part)
+        func = pltviewer.new_func(x=X,y=Y)
+        label = set_info[sets]['param'] + "=" + set_info[sets]['value']
+        color = colors_list[set_count]
+        curve = pltviewer.plot( function=func, figure=fig[fc] , label=label)
+        pltviewer.set_prop(curve, line_color=color)
+
+ 
+
+# Open PLTViewer 
+pltviewer = PLTViewer(new_figure=False)
+file_list = []
+
+# Find and import plt files
+
+plt_files = [x for x in os.listdir(".") if 'plt' in x]
+try:
+    assert len(plt_files) < 11
+except AssertionError:
+    print("""There are too many plt files here! Please limit the number of plt files in this directory to 10
+        and try running the session file again.""")
+    plt_files = plt_files[:10]
+
+cmap_length = len(plt_files)
+for plt in plt_files:
+     pltviewer.import_file(file=os.path.abspath(plt), ftype='plt')
+     
+
+# Get sets and info
+set_list = pltviewer.get_sets()
+set_info = {}
+pltRegex = re.compile(r'(\w\w\w\w)_(.*).plt')
+
+for sets in set_list:
+    set_info[os.path.basename(sets.label)] = {'id': sets.id, 'param': trans[pltRegex.search(os.path.basename(sets.label)).group(1)], 'value': pltRegex.search(os.path.basename(sets.label)).group(2)}
+
+"""
+for sets in set_list:
+    set_dict{os.path.basename(sets.label): 
+"""
+
+"""
+for conf in config_dict:
+    for sim in config_dict[conf]:
+        sim_label = '%s_%s' %(conf, sim)
+        for st in set_list:
+            if sim_label in st.label:
+                set_dict.update({ sim_label : st.id })
+"""
+
+# get colormap values
+colors_list = []
+cmap = matplotlib.cm.get_cmap(colormap, cmap_length)
+for i in range(cmap_length):
+    colors_list.append(matplotlib.colors.rgb2hex(cmap(i)[:3]))
+
+
+# Plot based on which options are in the user options list, over each plt file
+set_count = 0 # Set counter
+fig = []      # List of figures 
+for sets in set_info.keys():
+    fc = 0 # Figure Counter
+    for figure in plot_figures:
+        if set_count == 0: #Initialize the figures, only on first loop on sets
+            init_Figs(fig, fc, figure, sets)
+        
+        # TODO: Improve this so that is doesn't just pick between either a micro plot or a rad power plot... should also find some way to match what I want to the key list index...    
+        if 'Mic' in figure:
+            id = set_info[sets]['id']
+            set_component = set_list[int(set_info[sets]['id'])-1].pltdict.keys()[1]
+            component_identifier = set_list[int(set_info[sets]['id'])-1].pltdict.values()[1].dictobj.keys()[int(figure[-1])-1]
+            
+            X = '{pltviewer.get_set( id=%s).%s["%s"].field["f"]}' %(id, set_component, component_identifier)
+            Y = 'dB_pressure(MEAN(AMPLITUDE({pltviewer.get_set( id=%s).%s["%s"].field["fp"]})))' %(id, set_component, component_identifier)
+        else:
+            """
+            fc += 1
+            continue
+            """
+            #pltviewer_1.update_func(func=func_14,x='{set_1.POINT_2["3663425"].field["f"]}',y='dB_power(MEAN({set_2.DOMAIN["InfiniteAcoustic4"].field["rP"]}))')
+            id = set_info[sets]['id']
+            set_component = set_list[int(set_info[sets]['id'])-1].pltdict.keys()[0]
+            component_identifier = set_list[int(set_info[sets]['id'])-1].pltdict.values()[0].dictobj.keys()[2]
+            
+            if 'Out' in figure:
+                component_identifier = set_list[int(set_info[sets]['id'])-1].pltdict.values()[0].dictobj.keys()[3]
+            
+            X = '{pltviewer.get_set( id=%s).%s["%s"].field["f"]}' %(id, set_component, component_identifier)
+            Y = 'dB_power(MEAN({pltviewer.get_set( id=%s).%s["%s"].field["rP"]}))' %(id, set_component, component_identifier)
+            
+        #Plot on each figure    
+        func = pltviewer.new_func(x=X,y=Y)
+        label = set_info[sets]['param'] + "=" + set_info[sets]['value']
+        color = colors_list[set_count]
+        curve = pltviewer.plot( function=func, figure=fig[fc] , label=label)
+        pltviewer.set_prop(curve, line_color=color)
+        
+        fc += 1
+    set_count += 1
+
+
