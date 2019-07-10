@@ -2,18 +2,20 @@
 studies. If no sepcific case are passes as arguements the program tests all
 cases defined in the mandatory SNGR parameter inputfile"""
 
-import numpy, re, os, shutil, argparse, subprocess, sys
+import numpy, re, os, shutil, argparse, subprocess, sys, logging
 
 parser = argparse.ArgumentParser(
     description = '''My description of how this script works.''',
     epilog = '''For more help/questions email joe.orselli@fft.be''')
 parser.add_argument('FILE', help='Path to the input file containing the SNGR parameters')
-parser.add_argument('--path', '-p', help='Path to the repository of base cases', required = True)
 parser.add_argument('--cases', '-c', nargs='*', default = [], help = '''List of names of the cases from 
 the base case repository to be studied. If not specified, use all cases defined in input data file''') 
+parser.add_argument('--path', '-p', help='Path to the repository of base cases', required = True)
 args = parser.parse_args()
 
-# TODO: perform some checks to ensure that the repository exists, the input parameter file exists, etc.
+logging.basicConfig(level = logging.DEBUG, format=' %(levelname)s - %(message)s')
+
+# Perform some checks to ensure that the repository exists, the input parameter file exists, etc.
 
 # Go from relative paths to absolute paths
 args.path = os.path.abspath(args.path)
@@ -50,26 +52,36 @@ for case in args.cases:
 baseCaseName = {}
 params = {'freq': None, 'filt': None, 'samp': None, 'thld': None, 'turb': None}
 
+baseCaseLIMITS = {}
+paramsLIMITS = {'filt': None, 'samp': None, 'thld': None, 'turb': None}
+
+baseCaseCOMPINFO = {}
+paramsCOMPINFO = {'Machine': None, 'Queue': None, 'RAM Allocated': None, '# Procs': None, '# Threads': None}
+
+
 for caseName in args.cases:
     baseCaseName[caseName] = params.copy()
+    baseCaseLIMITS[caseName] = paramsLIMITS.copy()
+    baseCaseCOMPINFO[caseName] = paramsCOMPINFO.copy()
 
 def main():
     ''' Main function for flow control '''
 
     # Read Input File, extract relevant info using regexes and fill in parameter values in dictionaries
-    baseCaseName = extractParams()
+    [baseCaseName, baseCaseLIMITS] = extractParams()
 
     # Build Filetree with dictionary parameters EXCEPT frequency. Populate with base edat files
-    buildTree(baseCaseName)
+    #buildTree(baseCaseName, baseCaseLIMITS)
 
     # Edit the pathnames and parameters of the ICFD and Actran analysis accordingly
-    editParams(baseCaseName, args.path)
+    #editParams(baseCaseName, args.path)
 
     # Launch each ICFD case. Launch each Actran Analysis
-    local_launcher('icfd')
-    local_launcher('actran')
+    #local_launcher('icfd')
+    #local_launcher('actran')
 
     # TODO: Walk through BaseCase_Parametric filetrees, use session files for post-processing
+    post_pro()
 
 
 def extractParams():
@@ -77,6 +89,12 @@ def extractParams():
 
     inputFile = open(args.FILE)
     inputContents = inputFile.readlines()
+    inputFile.close()
+
+    defaultsFile = open(args.path + '\\case_defaults.txt')
+    defaultsContents = defaultsFile.readlines()
+    defaultsFile.close()
+
     freqRegex = re.compile(r'(Frequency: )(.+)(\s)')
     filtRegex = re.compile(r'(Filter: )(.+)(\s)')
     sampRegex = re.compile(r'(# Samples: )(.+)(\s)')
@@ -94,15 +112,39 @@ def extractParams():
                 baseCaseName[keys]['samp'] = sampRegex.search(''.join(chunk)).group(2).strip()
                 baseCaseName[keys]['thld'] = thldRegex.search(''.join(chunk)).group(2).strip()
                 baseCaseName[keys]['turb'] = turbRegex.search(''.join(chunk)).group(2).strip()
-    return baseCaseName
 
-def myRange(spaceDelimStr, parameter_type):
-    ''' Similar to np.arange, but working how I think it should work. The ending of a range is
-    always included. Also check for user errors in ranges in the input file. '''
-    
+        for lines in defaultsContents:
+            if caseRegex.search(lines):
+                chunk = defaultsContents[defaultsContents.index(lines):defaultsContents.index(lines)+16]
+                baseCaseLIMITS[keys]['freq'] = baseCaseName[keys]['freq']
+                baseCaseLIMITS[keys]['filt'] = filtRegex.search(''.join(chunk)).group(2).strip()
+                baseCaseLIMITS[keys]['samp'] = sampRegex.search(''.join(chunk)).group(2).strip()
+                baseCaseLIMITS[keys]['thld'] = thldRegex.search(''.join(chunk)).group(2).strip()
+                baseCaseLIMITS[keys]['turb'] = turbRegex.search(''.join(chunk)).group(2).strip()
+
+    return [baseCaseName, baseCaseLIMITS]
+
+
+def check_myRange(spaceDelimStr, case, parameter_type, limit):
+    '''Similar to myRange, only for checking for user errors in ranges and value choices in the input file.'''
+
     ran = []
     ranList = spaceDelimStr.split(' ')
     ranList = [a for a in ranList if a != '']
+    
+    # Test lower or upper values in ranList against limits. If the user has specificed limits beyond
+    # what is recommended in the defaults file, throw a warning
+    if parameter_type == ('thld' or 'filt'):
+        if ranList[-1] > limit:
+            warn = '''The maximum %s limit is exceeded for the %s case. Consider changing it 
+            so that the maximum value is less than %s''' % (parameter_type, case, limit)
+            logging.warning(warn)
+
+    if parameter_type == ('samp' or 'turb'):
+        if ranList[0] < limit:
+            warn = '''The minimum %s limit is exceeded for the %s case. Consider changing it 
+            so that the minimum value is greater than %s''' % (parameter_type, case, limit)
+            logging.warning(warn)
 
     if parameter_type == 'freq' and len(ranList) != 3:
         sys.exit('''The input file is formatted poorly. Frequency must be written as a range,
@@ -123,8 +165,8 @@ def myRange(spaceDelimStr, parameter_type):
     step = round(float(ranList[1]),2)
     end = round(float(ranList[2]),2)
     
-    # TODO: Check that none of the ranges are choosen poorly. If there is a negative value, end < start, 
-    # start + step > end, or non-ints for samps and turb modes, stop execution and throw a warning.
+    # Check that none of the ranges are choosen poorly. If there is a negative value, end < start, 
+    # start + step > end, or non-ints for samps and turb modes, stop execution and throw an error.
     if start < 0 or end < 0 or step < 0:
         sys.exit('''The input file is formatted poorly. Please make sure that no negative values are used
         for SNGR parameters''')
@@ -133,19 +175,36 @@ def myRange(spaceDelimStr, parameter_type):
         sys.exit('''The input file is formatted poorly. Either the range start value > stop value, or the step is 
         too small''')
 
+
+def myRange(spaceDelimStr):
+    '''Similar to np.arange, but working how I think it should work. The ending of a range is
+    always included.''' 
+  
+    ran = []
+    ranList = spaceDelimStr.split(' ')
+    ranList = [a for a in ranList if a != '']
+
+    if len(ranList) == 1:
+        return [round(float(spaceDelimStr),2)]
+
+    start = round(float(ranList[0]),2)
+    step = round(float(ranList[1]),2)
+    end = round(float(ranList[2]),2)
+    
     ran.append(start)
     while ran[-1] < end-step:
         ran.append(round(ran[-1] + step, 2))
     ran.append(end)
     return ran
 
-def buildTree(baseCaseName):
+def buildTree(baseCaseName, baseCaseLIMITS):
     ''' Make a filetree for the ranges of parameters given, and copy-paste the base case edat files. '''
 
     # Perform a check that the input file is formatted correctly
     for keys in baseCaseName.keys():
         for param_keys in baseCaseName[keys]:
-            myRange(baseCaseName[keys][param_keys], param_keys)
+            check_myRange(baseCaseName[keys][param_keys], keys, param_keys, baseCaseLIMITS[keys][param_keys])
+
 
     # For over each case being run
     for keys in baseCaseName.keys():
@@ -157,7 +216,7 @@ def buildTree(baseCaseName):
             if param_keys == 'freq':
                 continue
             else:
-                subcases = myRange(baseCaseName[keys][param_keys], param_keys)
+                subcases = myRange(baseCaseName[keys][param_keys])
                 if len(subcases) == 1:
                     count += 1 
                     if count == 4:
@@ -208,7 +267,7 @@ def editParams(baseCaseName, repo_path):
     for keys in baseCaseName.keys():
         # Get param_list for file edits
         for param_keys in baseCaseName[keys]:
-            param_list.append(myRange(baseCaseName[keys][param_keys], param_keys))
+            param_list.append(myRange(baseCaseName[keys][param_keys]))
 
         # Default parameter values
         filt = str(param_list[1][0]) 
@@ -269,7 +328,7 @@ def local_launcher(analysis):
     '''Walk over each case filetree and launch the ICFD cases, then the actran analysis.'''
    
 
-    actranpy_path = os.environ['ACTRAN_PATH'] + '\\Actran_19.0\\bin\\actranpy.bat'
+    actranpy_path = os.environ['ACTRAN_PATH'] + '\\Actran_19.1\\bin\\actranpy.bat'
     start_dir = os.getcwd()
     
     for keys in baseCaseName.keys():
@@ -293,8 +352,29 @@ def local_launcher(analysis):
 def post_pro():
     '''Copy default session files from automation repository to case directory. Make the
     necessary edits and run, have all images output to 'figures' directory.'''
+    
+    for keys in baseCaseName.keys():
+        for baseDir, subDir, files in os.walk('.\\' + keys):
+            if files == [] and baseDir != '.\\' + keys:   # In the parameter subdirectory
+                try:
+                    os.mkdir('.\\' + baseDir + '\\PostPro')
+                    shutil.copy(args.path + '\\' + keys + '_Joe.sess', '.\\' + baseDir + '\\PostPro')
+                    #shutil.copy(args.path + '\\' + keys + '.sess', '.\\' + baseDir + '\\PostPro')
+                except:
+                    print('That directory already exists!')
+            if subDir == []:        # Lowest level
+                plt_file = [x for x in files if '.plt' in x]
+                plt_file = plt_file[0]
+                shutil.copy(os.path.abspath(baseDir) + '\\' + plt_file, baseDir + '\..\PostPro')
+                shutil.move(baseDir + '\..\PostPro' + '\\' + plt_file, baseDir + '\..\PostPro\\' + os.path.basename(baseDir) + '.plt')
 
 
+        # Launch Session Script for post-processing
+        actran_sess = os.environ['ACTRAN_PATH'] + '\\Actran_19.1\\bin\\actranvi.bat'
+        start_dir = os.getcwd()
+        inputfile = keys + '_Joe.sess'
+        os.chdir(keys + '\\filt\\PostPro') # TODO: Fix this line
+        #subprocess.call([actran_sess, "-x" + inputfile, "--no_graphics"]) 
+        subprocess.call([actran_sess, "-x" + inputfile]) 
 
 main()
-
